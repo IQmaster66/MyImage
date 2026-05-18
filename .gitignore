@@ -3,7 +3,7 @@ api/.venv/
 api/__pycache__/
 api/**/__pycache__/
 *.py[cod]
-api/.hf/
+# api/.hf/ 若需推送可删掉本行（注意体积）
 api/data/
 
 # Node (web)
@@ -29,8 +29,10 @@ api/.env
 Thumbs.db
 *.pem
 
-# 本地对象存储数据
-minio/
+# MinIO：可推送数据与脚本；可执行文件超过 GitHub 100MB 单文件上限
+minio/minio.exe
+minio/mc.exe
 
-# Hugging Face 缓存（项目根）
+# Hugging Face 缓存（约 10GB+，GitHub 无法直接推送，见 README）
+# 若坚持用 Git LFS 可删除下一行并自行配置 LFS
 .hf/

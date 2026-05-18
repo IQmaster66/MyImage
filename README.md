@@ -11,6 +11,15 @@ start-dev.bat
 - 前端：`web/` → 见 `web/package.json`
 - 后端：`api/` → 见 `api/requirements.txt`
 
+## 大文件夹与 GitHub 限制
+
+| 路径 | 体积（约） | 能否普通 `git push` |
+|------|------------|---------------------|
+| `minio/` | ~160MB（含 exe） | **可推** `minio-data/`、脚本等；`minio.exe` / `mc.exe` 单文件过大，已在 `.gitignore` 排除，需本机保留或另下 |
+| `.hf/` | **~10GB+** | **不能**用普通 Git 推送到 GitHub（超限且极慢） |
+
+`.hf` 是 Hugging Face 模型缓存，换电脑后可在 `api` 里重新下载。若必须备份，请用网盘 / 移动硬盘，不要放进 Git 仓库。
+
 ## 连接 GitHub
 
 1. 在 GitHub 新建**空仓库**（不要勾选 “Add a README”）。
