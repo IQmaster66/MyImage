@@ -1,0 +1,27 @@
+# =============================================================================
+# api/.hf 是「配置文件」（本文件），不是模型二进制存放处。
+#
+# 模型放哪里？
+#   → 磁盘上的文件夹，由 HF_MODELS_ROOT 指定（默认：与 api 同级的 ../.hf 目录，
+#      即整个项目的 MyImage/.hf，里面是 HuggingFace 常见的 models--作者--模型名/...）
+#
+# 本文件里写什么？
+#   → HF_MODELS_ROOT（可选）
+#   → 各模型的覆盖路径：CAPTION_MODEL_DIR、ZH_EN_MODEL_DIR、WD_CONVNEXTV2_PATH 等
+#   → 留空的变量会自动用内置 Hub 默认名，并从 HF_MODELS_ROOT 下载缓存
+# =============================================================================
+
+# 模型根目录（文件夹路径）。相对路径相对于 api/；不写则等价于 ../.hf
+# HF_MODELS_ROOT=../.hf
+
+# BLIP / Marian：填本机 snapshots（含 config.json）或留空用 Hub ID + 上面缓存目录
+CAPTION_MODEL_DIR=
+ZH_EN_MODEL_DIR=
+EN_ZH_MODEL_DIR=
+
+# WD14 ONNX：指向含 model.onnx + selected_tags.csv 的 snapshots 目录（也可用相对 HF_MODELS_ROOT 的路径）
+# WD_CONVNEXTV2_PATH=../.hf/models--SmilingWolf--wd-v1-4-convnextv2-tagger-v2/snapshots/bf364499ea843a403cc2770072f31f5cfb2ffa58
+# WD_SWINV2_PATH=../.hf/models--SmilingWolf--wd-v1-4-swinv2-tagger-v2/snapshots/8350dd529d920aab46156928654cba67c71dc348
+# WD_VIT_PATH=
+# WD_DEFAULT_MODEL=wd14-convnextv2-v2
+# WD_USE_CPU=false

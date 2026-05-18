@@ -1,0 +1,36 @@
+# Python (api)
+api/.venv/
+api/__pycache__/
+api/**/__pycache__/
+*.py[cod]
+api/.hf/
+api/data/
+
+# Node (web)
+web/node_modules/
+web/.next/
+web/out/
+web/build/
+web/.vercel
+*.tsbuildinfo
+web/next-env.d.ts
+
+# 环境与密钥（勿提交）
+.env
+.env.*
+!.env.example
+!api/.env.example
+!api/.hf.example
+api/.env
+
+# 日志与系统
+*.log
+.DS_Store
+Thumbs.db
+*.pem
+
+# 本地对象存储数据
+minio/
+
+# Hugging Face 缓存（项目根）
+.hf/

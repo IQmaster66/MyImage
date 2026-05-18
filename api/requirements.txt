@@ -1,0 +1,16 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.12
+torch>=2.2.0
+transformers>=4.40.0
+pillow>=10.2.0
+accelerate>=0.30.0
+# WD14 ONNX（参考 tagger/backend-fastapi）；GPU 可改用 onnxruntime-gpu
+numpy>=1.26.0
+pandas>=2.0.0
+opencv-python-headless>=4.8.0
+onnxruntime>=1.16.0
+huggingface_hub>=0.20.0
+sentencepiece>=0.2.0
+minio>=7.2.0
