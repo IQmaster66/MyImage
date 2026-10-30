@@ -1,7 +1,0 @@
-# api/.hf = 配置文本；模型二进制放在 HF_MODELS_ROOT 文件夹（默认 ../.hf = 项目根 .hf）。
-# 下面各项填本机路径或留空（留空则用 Hub 默认名并从 HF_MODELS_ROOT 缓存）。
-# HF_MODELS_ROOT=../.hf
-
-CAPTION_MODEL_DIR=../.hf/blip-image-captioning-base
-ZH_EN_MODEL_DIR=
-EN_ZH_MODEL_DIR=

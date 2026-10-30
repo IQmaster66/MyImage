@@ -1,12 +1,24 @@
 # MinIO（Windows）快速使用说明
 
-本目录包含 `minio.exe` 与 `mc.exe`，可用于在 Windows 上快速启动一个本地 MinIO 服务并通过 `mc` 进行管理。
+本目录用于在 Windows 上启动本地 MinIO，供 MyImage 存放人物百科、临时插画等图片。
+
+> **重要：** `minio.exe` / `mc.exe` **不会**随 Git 仓库分发（单文件超过 GitHub 100MB 限制）。  
+> `minio-data/` 为本机对象数据，也已从 Git 忽略，克隆后需自行启动并创建空数据目录。
+
+## 下载可执行文件
+
+将下列文件放到本目录（与本 README 同级）：
+
+| 文件 | 下载 |
+|------|------|
+| `minio.exe` | [MinIO Server Windows amd64](https://dl.min.io/server/minio/release/windows-amd64/minio.exe) |
+| `mc.exe`（可选） | [MinIO Client Windows amd64](https://dl.min.io/client/mc/release/windows-amd64/mc.exe) |
 
 ## 目录结构
 
-- **minio.exe**：MinIO Server
-- **mc.exe**：MinIO Client（管理工具）
-- **minio-data/**：默认数据目录（对象数据会写入这里）
+- **minio.exe**：MinIO Server（需自备）
+- **mc.exe**：MinIO Client（可选，需自备）
+- **minio-data/**：默认数据目录（对象数据写入这里；勿提交到 Git）
 
 ## 启动 MinIO（本地单机）
 
@@ -75,10 +87,26 @@ $env:MINIO_ROOT_PASSWORD = "minioadmin123"
 .\mc.exe share download local/my-bucket/example.txt
 ```
 
+## 与 MyImage API 对接
+
+默认与 `api/.env.example` 一致时：
+
+- Endpoint：`127.0.0.1:9000`
+- 用户 / 密码：`minioadmin` / `minioadmin123`（生产请改强密码）
+- Bucket 名：`myimage`（需自行创建一次）
+
+创建 bucket 示例：
+
+```powershell
+.\mc.exe alias set local http://127.0.0.1:9000 minioadmin minioadmin123
+.\mc.exe mb local/myimage
+```
+
 ## 常见问题
 
 - **端口被占用**：确保 `9000/9001` 未被其它程序占用；或用参数/环境变量调整端口后再启动。
-- **数据在哪里**：对象数据默认写入本目录下的 `minio-data/`。
+- **数据在哪里**：对象数据默认写入本目录下的 `minio-data/`。换机器请拷贝该目录，或接受空库重新上传图片。
+- **仓库里没有 exe**：见上文「下载可执行文件」，这是刻意设计，不是缺失。
 
 ## 开机自启动 MinIO（Windows）
 

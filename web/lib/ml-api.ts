@@ -29,6 +29,18 @@ export async function postCaption(
   return res.json() as Promise<CaptionResult>;
 }
 
+function parseMlApiErrorBody(raw: string, status: number): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return `HTTP ${status}`;
+  try {
+    const o = JSON.parse(trimmed) as { detail?: unknown };
+    if (typeof o.detail === "string") return o.detail;
+  } catch {
+    /* 非 JSON */
+  }
+  return trimmed;
+}
+
 export async function postTranslate(
   text: string,
   direction: "zh2en" | "en2zh",
@@ -41,7 +53,7 @@ export async function postTranslate(
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => res.statusText);
-    throw new Error(errText || `HTTP ${res.status}`);
+    throw new Error(parseMlApiErrorBody(errText, res.status));
   }
   const data = (await res.json()) as { text: string };
   return data.text;
@@ -102,6 +114,21 @@ export async function postUploadCharacterImage(
   const fd = new FormData();
   fd.append("file", blob, filename);
   const res = await fetch(`${base}/minio/upload-character-image`, { method: "POST", body: fd });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(errText || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<MinioUploadCharacterImageResult>;
+}
+
+export async function postUploadPromptPreviewImage(
+  blob: Blob,
+  filename: string,
+): Promise<MinioUploadCharacterImageResult> {
+  const base = getMlApiBase();
+  const fd = new FormData();
+  fd.append("file", blob, filename);
+  const res = await fetch(`${base}/minio/upload-prompt-preview-image`, { method: "POST", body: fd });
   if (!res.ok) {
     const errText = await res.text().catch(() => res.statusText);
     throw new Error(errText || `HTTP ${res.status}`);

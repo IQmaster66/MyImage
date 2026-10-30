@@ -1,6 +1,29 @@
 /** Client-side image helpers for the toolbox (Canvas API). */
 
-export type ExportFormat = "image/png" | "image/jpeg" | "image/webp";
+export type ExportFormat = "image/png" | "image/jpeg" | "image/webp" | "image/avif";
+
+export type ExportFormatChoice = {
+  value: ExportFormat;
+  /** 下拉菜单展示名 */
+  label: string;
+  /** 下载文件扩展名（不含点） */
+  extension: string;
+  /** 为 false 时显示质量滑块 */
+  lossless: boolean;
+};
+
+/** 工具箱导出 / 元数据导出共用的格式列表（顺序即下拉顺序） */
+export const EXPORT_FORMAT_CHOICES: ExportFormatChoice[] = [
+  { value: "image/jpeg", label: "JPG / JPEG（体积小，有损）", extension: "jpg", lossless: false },
+  { value: "image/webp", label: "WebP（推荐，体积小）", extension: "webp", lossless: false },
+  { value: "image/avif", label: "AVIF（更小，需较新浏览器）", extension: "avif", lossless: false },
+  { value: "image/png", label: "PNG（无损，体积大）", extension: "png", lossless: true },
+];
+
+export function exportFormatUsesQuality(format: ExportFormat): boolean {
+  const choice = EXPORT_FORMAT_CHOICES.find((c) => c.value === format);
+  return choice ? !choice.lossless : format !== "image/png";
+}
 
 export type NormalizedRect = {
   nx: number;
@@ -111,6 +134,81 @@ export function canvasFromImage(img: HTMLImageElement): HTMLCanvasElement {
   return canvas;
 }
 
+/** 经画布重编码，去除 EXIF / PNG 文本块等全部元数据。 */
+export async function reencodeImageWithoutMetadata(
+  file: File,
+  format: ExportFormat,
+  quality: number,
+): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await loadImageFromUrl(url);
+    const canvas = canvasFromImage(img);
+    return canvasToBlob(canvas, format, format === "image/png" ? undefined : quality);
+  } finally {
+    revokeUrl(url);
+  }
+}
+
+export type PngToJpegOptions = {
+  quality?: number;
+  /** 最长边上限；不传或 ≤0 表示保持原分辨率 */
+  maxEdge?: number;
+  /** JPEG 不支持透明：透明区域填此底色（默认白） */
+  matteColor?: string;
+};
+
+/**
+ * PNG（或任意位图）→ JPEG：画布重编码，去掉全部元数据；透明底用 matte 填充。
+ */
+export async function convertImageFileToJpeg(
+  file: Blob,
+  options: PngToJpegOptions = {},
+): Promise<Blob> {
+  const quality = options.quality ?? 0.88;
+  const matte = options.matteColor ?? "#ffffff";
+  const maxEdge = options.maxEdge && options.maxEdge > 0 ? options.maxEdge : 0;
+
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await loadImageFromUrl(url);
+    let w = img.naturalWidth;
+    let h = img.naturalHeight;
+    if (!w || !h) throw new Error("无法读取图片尺寸");
+    if (maxEdge > 0) {
+      const edge = Math.max(w, h);
+      if (edge > maxEdge) {
+        const scale = maxEdge / edge;
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+      }
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("无法创建画布上下文");
+    ctx.fillStyle = matte;
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvasToBlob(canvas, "image/jpeg", quality);
+  } finally {
+    revokeUrl(url);
+  }
+}
+
+export function jpgNameFromPngName(fileName: string): string {
+  return fileName.replace(/\.png$/i, ".jpg");
+}
+
+export function formatBytesShort(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export function cropNormalizedToCanvas(
   source: HTMLImageElement,
   rect: NormalizedRect,
@@ -198,9 +296,7 @@ export function drawTextWatermark(
 }
 
 export function extensionForMime(mime: ExportFormat): string {
-  if (mime === "image/png") return "png";
-  if (mime === "image/webp") return "webp";
-  return "jpg";
+  return EXPORT_FORMAT_CHOICES.find((c) => c.value === mime)?.extension ?? "jpg";
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

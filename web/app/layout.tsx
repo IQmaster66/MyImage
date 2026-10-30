@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Script from "next/script";
+import { cookies } from "next/headers";
+import { CornerMascot } from "@/components/corner-mascot";
+import { MainContentShell } from "@/components/main-content-shell";
 import { SiteHeader } from "@/components/site-header";
+import { ThemeSync } from "@/components/theme-sync";
+import { THEME_COOKIE } from "@/lib/theme";
 import { Providers } from "./providers";
 import "./globals.css";
-
-const THEME_BOOT = `(function(){try{var t=localStorage.getItem('theme');var d=t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches);document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,26 +24,27 @@ export const metadata: Metadata = {
   description: "基于 Next.js、TanStack Query、MinIO 的图片浏览站点前端",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const jar = await cookies();
+  const theme = jar.get(THEME_COOKIE)?.value;
+  const dark = theme === "dark";
+
   return (
     <html
       lang="zh-CN"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased${dark ? " dark" : ""}`}
     >
       <body className="flex min-h-full flex-col bg-background text-foreground">
-        <Script
-          id="theme-boot"
-          strategy="beforeInteractive"
-          dangerouslySetInnerHTML={{ __html: THEME_BOOT }}
-        />
+        <ThemeSync />
         <Providers>
           <SiteHeader />
-          {children}
+          <MainContentShell>{children}</MainContentShell>
+          <CornerMascot />
         </Providers>
       </body>
     </html>

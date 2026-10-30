@@ -5,7 +5,7 @@ import { useCharacterEntries } from "@/hooks/use-character-entries";
 import { useTempIllustrationEntries } from "@/hooks/use-temp-illustration-entries";
 import { characterHasImage, type CharacterEntry } from "@/lib/character-types";
 import { fetchMinioReadUrl } from "@/lib/ml-api";
-import type { TempIllustrationEntry } from "@/lib/temp-illustration-db";
+import type { TempIllustrationEntry } from "@/lib/temp-illustration-types";
 import { useEffect, useMemo, useState } from "react";
 
 type UnifiedItem =
@@ -36,7 +36,7 @@ function buildUnified(
 /** 限制极大竖图占满屏过高；横图仍按列宽缩放 */
 const IMAGE_MAX_H = "min(85vh,56rem)";
 
-function BlobThumb({
+function TempIllustrationColumnThumb({
   entry,
   onOpen,
 }: {
@@ -45,30 +45,49 @@ function BlobThumb({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- reset before binding new blob / dimensions */
     let cancelled = false;
+    /* eslint-disable react-hooks/set-state-in-effect -- reset before loading new key */
     setDims(null);
-    const u = URL.createObjectURL(entry.blob);
-    setUrl(u);
+    setUrl(null);
+    setFailed(false);
     /* eslint-enable react-hooks/set-state-in-effect */
-    const im = new Image();
-    im.onload = () => {
-      if (!cancelled) setDims({ w: im.naturalWidth, h: im.naturalHeight });
-    };
-    im.onerror = () => {
-      if (!cancelled) setDims({ w: 3, h: 4 });
-    };
-    im.src = u;
+
+    void fetchMinioReadUrl(entry.imageKey)
+      .then((u) => {
+        if (cancelled) return;
+        setUrl(u);
+        const im = new Image();
+        im.onload = () => {
+          if (!cancelled) setDims({ w: im.naturalWidth, h: im.naturalHeight });
+        };
+        im.onerror = () => {
+          if (!cancelled) setDims({ w: 3, h: 4 });
+        };
+        im.src = u;
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+
     return () => {
       cancelled = true;
-      URL.revokeObjectURL(u);
     };
-  }, [entry.blob, entry.id]);
+  }, [entry.imageKey, entry.id]);
 
   const label = entry.title?.trim() || "临时插画";
   const ready = Boolean(url && dims);
+
+  if (failed) {
+    return (
+      <div className="flex min-h-[10rem] w-full flex-col items-center justify-center rounded-xl border border-gray-200/90 bg-gray-100 px-2 text-center text-[11px] leading-snug text-gray-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-gray-400">
+        无法加载图片
+        <span className="mt-1 text-[10px] opacity-80">请检查 ML API 与 MinIO</span>
+      </div>
+    );
+  }
 
   return (
     <button
@@ -231,24 +250,8 @@ export function RecommendGallery() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-b from-emerald-50/80 via-white/90 to-zinc-50/90 dark:from-emerald-950/35 dark:via-zinc-950/80 dark:to-zinc-950">
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-8 sm:px-6 sm:py-10">
-        <header className="mb-8 rounded-2xl border border-emerald-200/70 bg-white/90 p-5 shadow-sm backdrop-blur-sm dark:border-emerald-900/45 dark:bg-zinc-900/85 sm:p-6">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-3xl">
-              推荐
-            </h1>
-            {allReady ? (
-              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200">
-                {unified.length} 张图片
-              </span>
-            ) : null}
-          </div>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-            汇集本机临时插画与人物百科中的配图，按原始比例完整显示（不裁切）；点击缩略图可放大浏览。不展示 SD 参数与提示词正文。
-          </p>
-        </header>
-
+    <div className="flex min-h-0 flex-1 flex-col">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-6 sm:px-6 sm:py-8">
         {lightboxErr ? (
           <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
             {lightboxErr}
@@ -277,7 +280,7 @@ export function RecommendGallery() {
             {unified.map((item) => (
               <li key={item.key} className="mb-5 break-inside-avoid">
                 {item.kind === "temp" ? (
-                  <BlobThumb entry={item.temp} onOpen={openLightbox} />
+                  <TempIllustrationColumnThumb entry={item.temp} onOpen={openLightbox} />
                 ) : (
                   <CharacterColumnThumb
                     entry={item.character}

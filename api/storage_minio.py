@@ -70,24 +70,124 @@ def get_client() -> Minio:
     )
 
 
-def is_safe_characters_key(key: str) -> bool:
-    if not key.startswith("characters/"):
+def _is_safe_key_prefix(key: str, prefix: str) -> bool:
+    if not key.startswith(prefix):
         return False
     if ".." in key or key.startswith("/") or "\\" in key:
         return False
     return True
 
 
-def remove_characters_object(object_key: str) -> None:
-    """删除 `characters/` 下对象；键不合法或对象不存在时忽略。"""
-    if not is_safe_characters_key(object_key):
+def is_safe_characters_key(key: str) -> bool:
+    return _is_safe_key_prefix(key, "characters/")
+
+
+def is_safe_temp_illustration_key(key: str) -> bool:
+    return _is_safe_key_prefix(key, "temp-illustrations/")
+
+
+def is_safe_prompt_preview_key(key: str) -> bool:
+    return _is_safe_key_prefix(key, "prompt-previews/")
+
+
+def is_safe_object_key(key: str) -> bool:
+    return (
+        is_safe_characters_key(key)
+        or is_safe_temp_illustration_key(key)
+        or is_safe_prompt_preview_key(key)
+    )
+
+
+def remove_object(object_key: str) -> None:
+    """删除允许前缀下的对象；键不合法或对象不存在时忽略。"""
+    if not is_safe_object_key(object_key):
         return
     try:
         client = get_client()
         client.remove_object(bucket_name(), object_key)
     except S3Error as e:
         if getattr(e, "code", "") != "NoSuchKey":
-            logger.warning("MinIO remove_characters_object %s: %s", object_key, e)
+            logger.warning("MinIO remove_object %s: %s", object_key, e)
+
+
+def remove_characters_object(object_key: str) -> None:
+    """删除 `characters/` 下对象；键不合法或对象不存在时忽略。"""
+    if not is_safe_characters_key(object_key):
+        return
+    remove_object(object_key)
+
+
+def get_object_bytes(object_key: str) -> tuple[bytes, str]:
+    """
+    读取对象内容与 content_type。
+    返回 (raw, content_type)。键不合法或不存在时抛 HTTPException。
+    """
+    if not is_safe_object_key(object_key):
+        raise HTTPException(400, "非法对象键")
+    try:
+        client = get_client()
+        b = bucket_name()
+        stat = client.stat_object(b, object_key)
+        resp = client.get_object(b, object_key)
+        try:
+            raw = resp.read()
+        finally:
+            resp.close()
+            resp.release_conn()
+    except S3Error as e:
+        code = getattr(e, "code", "") or ""
+        if code in ("NoSuchKey", "NoSuchObject"):
+            raise HTTPException(404, "对象不存在") from e
+        logger.exception("MinIO get_object failed")
+        raise HTTPException(502, f"对象存储读取失败: {e}") from e
+    ct = (getattr(stat, "content_type", None) or "application/octet-stream").split(";")[0].strip().lower()
+    return raw, ct
+
+
+def encode_image_to_jpeg(
+    raw: bytes,
+    *,
+    quality: int = 85,
+    max_edge: int = 2000,
+) -> bytes:
+    """
+    任意位图 → JPEG 字节（RGB，白底铺透明）。
+    quality: 1–95；max_edge≤0 表示不缩放。
+    """
+    q = max(1, min(95, int(quality)))
+    try:
+        im = Image.open(io.BytesIO(raw))
+        im.load()
+    except (UnidentifiedImageError, OSError) as e:
+        raise ValueError("无法识别为图片") from e
+
+    if im.format and str(im.format).upper() == "SVG":
+        raise ValueError("不支持将 SVG 转为 JPEG")
+
+    if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+        rgba = im.convert("RGBA")
+        bg = Image.new("RGB", rgba.size, (255, 255, 255))
+        bg.paste(rgba, mask=rgba.split()[-1])
+        im = bg
+    else:
+        im = im.convert("RGB")
+
+    if max_edge and max_edge > 0:
+        w, h = im.size
+        edge = max(w, h)
+        if edge > max_edge:
+            scale = max_edge / edge
+            nw = max(1, round(w * scale))
+            nh = max(1, round(h * scale))
+            try:
+                resample = Image.Resampling.LANCZOS
+            except AttributeError:
+                resample = Image.LANCZOS  # type: ignore[attr-defined]
+            im = im.resize((nw, nh), resample)
+
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=q, optimize=True)
+    return buf.getvalue()
 
 
 def ensure_bucket() -> None:
@@ -115,41 +215,76 @@ def _ext_for_content_type(ct: str | None) -> str:
     return m.get(ct.split(";")[0].strip().lower(), ".bin")
 
 
-@router.post("/upload-character-image")
-async def upload_character_image(file: UploadFile = File(...)):
-    if not file.content_type or not file.content_type.startswith("image/"):
+def _normalize_image_content_type(content_type: str | None) -> str:
+    if not content_type or not content_type.startswith("image/"):
         raise HTTPException(400, "请上传图片文件")
+    return content_type.split(";")[0].strip().lower()
 
-    raw = await file.read()
+
+def _validate_image_bytes(raw: bytes, content_type: str) -> None:
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, f"文件过大（上限 {MAX_UPLOAD_BYTES // 1024 // 1024} MB）")
+    if content_type == "image/svg+xml":
+        return
+    try:
+        im = Image.open(io.BytesIO(raw))
+        im.load()
+        im.close()
+    except (UnidentifiedImageError, OSError) as e:
+        raise HTTPException(400, "无法识别为图片") from e
 
-    ct = file.content_type.split(";")[0].strip().lower()
-    if ct != "image/svg+xml":
-        try:
-            im = Image.open(io.BytesIO(raw))
-            im.load()
-            im.close()
-        except (UnidentifiedImageError, OSError) as e:
-            raise HTTPException(400, "无法识别为图片") from e
 
-    ext = _ext_for_content_type(file.content_type)
-    key = f"characters/{uuid.uuid4().hex}{ext}"
-
+def put_image_bytes(prefix: str, raw: bytes, content_type: str | None) -> str:
+    """
+    Validate image bytes and put under `{prefix}{uuid}{ext}`.
+    `prefix` must be one of the managed image prefixes (with trailing slash).
+    Returns the object key. Raises HTTPException on validation / storage failure.
+    """
+    if prefix not in ("characters/", "temp-illustrations/", "prompt-previews/"):
+        raise HTTPException(500, f"未知上传前缀: {prefix}")
+    ct = _normalize_image_content_type(content_type)
+    _validate_image_bytes(raw, ct)
+    key = f"{prefix}{uuid.uuid4().hex}{_ext_for_content_type(ct)}"
     try:
         client = get_client()
-        b = bucket_name()
-        client.put_object(b, key, io.BytesIO(raw), length=len(raw), content_type=ct or "application/octet-stream")
+        client.put_object(
+            bucket_name(),
+            key,
+            io.BytesIO(raw),
+            length=len(raw),
+            content_type=ct or "application/octet-stream",
+        )
     except S3Error as e:
         logger.exception("MinIO put_object failed")
         raise HTTPException(502, f"对象存储写入失败: {e}") from e
+    return key
 
+
+async def _upload_image_under_prefix(prefix: str, file: UploadFile) -> dict[str, str]:
+    raw = await file.read()
+    key = put_image_bytes(prefix, raw, file.content_type)
     return {"object_key": key}
+
+
+@router.post("/upload-character-image")
+async def upload_character_image(file: UploadFile = File(...)):
+    return await _upload_image_under_prefix("characters/", file)
+
+
+@router.post("/upload-temp-illustration-image")
+async def upload_temp_illustration_image(file: UploadFile = File(...)):
+    return await _upload_image_under_prefix("temp-illustrations/", file)
+
+
+@router.post("/upload-prompt-preview-image")
+async def upload_prompt_preview_image(file: UploadFile = File(...)):
+    """词库提示词效果参考图（键由词库条目 preview_image_key 引用）。"""
+    return await _upload_image_under_prefix("prompt-previews/", file)
 
 
 @router.get("/presign-get")
 def presign_get(object_key: str = Query(..., alias="object_key")):
-    if not is_safe_characters_key(object_key):
+    if not is_safe_object_key(object_key):
         raise HTTPException(400, "非法对象键")
 
     try:
@@ -171,18 +306,8 @@ def presign_get(object_key: str = Query(..., alias="object_key")):
 
 
 @router.delete("/object")
-def delete_object(object_key: str = Query(..., alias="object_key")):
-    if not is_safe_characters_key(object_key):
+def delete_object_route(object_key: str = Query(..., alias="object_key")):
+    if not is_safe_object_key(object_key):
         raise HTTPException(400, "非法对象键")
-
-    try:
-        client = get_client()
-        b = bucket_name()
-        client.remove_object(b, object_key)
-    except S3Error as e:
-        if getattr(e, "code", "") == "NoSuchKey":
-            return {"ok": True, "note": "对象已不存在"}
-        logger.exception("MinIO remove_object failed")
-        raise HTTPException(502, f"删除失败: {e}") from e
-
+    remove_object(object_key)
     return {"ok": True}

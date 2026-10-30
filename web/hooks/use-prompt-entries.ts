@@ -10,11 +10,6 @@ export function usePromptEntries(query: PromptQuery) {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (typeof indexedDB === "undefined") {
-      setItems([]);
-      setReady(true);
-      return;
-    }
     try {
       setError(null);
       const all = await getAllPrompts();
@@ -25,7 +20,7 @@ export function usePromptEntries(query: PromptQuery) {
     } finally {
       setReady(true);
     }
-  }, [query.search, query.kind, query.tag, query.favorited]);
+  }, [query]);
 
   useEffect(() => {
     void refresh();

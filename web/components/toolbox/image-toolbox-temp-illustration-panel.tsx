@@ -18,7 +18,7 @@ export function ImageToolboxTempIllustrationPanel({ disabled, busy, hint, onSave
       <div className="space-y-3 border-t border-gray-100 px-2 pb-3 pt-3 dark:border-gray-700/80">
         <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-400">
           将<strong className="font-medium text-gray-800 dark:text-gray-200">当前上传的原始文件</strong>
-          存入浏览器本地「临时插画」列表（IndexedDB）。解析 PNG / EXIF 中的 SD 参数并一并保存；在临时插画页点击缩略图即可查看与工具箱相同的参数卡片。
+          上传至 MinIO 并写入服务端条目（含生成参数）。解析 PNG / EXIF 中的 A1111 parameters 或 ComfyUI prompt/workflow，并一并保存；在临时插画页点击缩略图即可查看参数卡片。
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <button

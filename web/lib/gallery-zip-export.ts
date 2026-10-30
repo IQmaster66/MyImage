@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 import type { CharacterEntry } from "@/lib/character-types";
 import { fetchMinioReadUrl } from "@/lib/ml-api";
-import type { TempIllustrationEntry } from "@/lib/temp-illustration-db";
+import type { TempIllustrationEntry } from "@/lib/temp-illustration-types";
 import { downloadBlob } from "@/lib/image-toolbox";
 
 /** 用于 ZIP 内路径的片段：去掉非法字符并限制长度 */
@@ -36,13 +36,26 @@ export function zipFilenameWithDate(prefix: string): string {
   return `${prefix}-${stamp}.zip`;
 }
 
-export function tempIllustrationZipParts(entries: TempIllustrationEntry[]): { pathInZip: string; data: Blob }[] {
-  return entries.map((e, i) => {
-    const idx = String(i + 1).padStart(3, "0");
-    const base = sanitizeFilenameSegment(e.title || "未命名");
-    const ext = extFromMime(e.mimeType);
-    return { pathInZip: `${idx}-${base}-${e.id.slice(0, 8)}.${ext}`, data: e.blob };
-  });
+export async function tempIllustrationZipParts(
+  entries: TempIllustrationEntry[],
+): Promise<{ pathInZip: string; data: Blob }[]> {
+  return Promise.all(
+    entries.map(async (e, i) => {
+      const readUrl = await fetchMinioReadUrl(e.imageKey);
+      const res = await fetch(readUrl);
+      if (!res.ok) {
+        throw new Error(`「${e.title || "未命名"}」图片下载失败（HTTP ${res.status}）`);
+      }
+      const blob = await res.blob();
+      const idx = String(i + 1).padStart(3, "0");
+      const base = sanitizeFilenameSegment(e.title || "未命名");
+      const fromKey = extFromObjectKey(e.imageKey);
+      const fromHdr = res.headers.get("content-type");
+      const ext = fromKey ?? extFromMime(fromHdr || e.mimeType);
+      const dotExt = ext === "bin" ? "jpg" : ext;
+      return { pathInZip: `${idx}-${base}-${e.id.slice(0, 8)}.${dotExt}`, data: blob };
+    }),
+  );
 }
 
 export async function characterImageZipParts(entries: CharacterEntry[]): Promise<{ pathInZip: string; data: Blob }[]> {

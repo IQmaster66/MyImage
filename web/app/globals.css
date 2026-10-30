@@ -7,7 +7,14 @@
  * 主题色仅随 html 上的 .dark 切换（与 layout 里 theme-boot、SiteHeader 一致）。
  * 不要用 prefers-color-scheme 改 :root 变量，否则会出现「body 已深色但 Tailwind dark: 未启用」的错乱。
  */
+html {
+  /* 路由切换 / 弹层开关时滚动条出现消失不再挤动版心 */
+  scrollbar-gutter: stable;
+}
+
 :root {
+  /* 无 stable gutter 的浏览器：滚动锁定时由 JS 写入 */
+  --scroll-lock-pad: 0px;
   --background: #ffffff;
   --foreground: #171717;
   color-scheme: light;
@@ -76,4 +83,97 @@ body {
   *::-webkit-scrollbar-corner {
     background-color: var(--scrollbar-corner);
   }
+}
+
+@keyframes copy-feedback-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.copy-feedback-toast {
+  animation: copy-feedback-in 0.18s ease-out;
+}
+
+@keyframes mascot-hop {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  35% {
+    transform: translateY(-16px) rotate(-8deg);
+  }
+  70% {
+    transform: translateY(0) rotate(7deg);
+  }
+}
+
+@keyframes mascot-talk-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes mascot-talk-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+
+.mascot-talk-bubble {
+  animation: mascot-talk-in 0.22s ease-out;
+}
+
+.mascot-talk-pulse {
+  animation: mascot-talk-pulse 1.1s ease-in-out infinite;
+}
+
+.mascot-talk-tail {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: color-mix(in srgb, white 95%, transparent);
+  border-right: 1px solid color-mix(in srgb, #a7f3d0 80%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, #a7f3d0 80%, transparent);
+  box-sizing: border-box;
+}
+
+:is(.dark) .mascot-talk-tail {
+  background: color-mix(in srgb, #18181b 95%, transparent);
+  border-right-color: color-mix(in srgb, #064e3b 50%, transparent);
+  border-bottom-color: color-mix(in srgb, #064e3b 50%, transparent);
+}
+
+.mascot-talk-bubble[data-place="above"] .mascot-talk-tail {
+  left: 50%;
+  bottom: -6px;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.mascot-talk-bubble[data-place="left"] .mascot-talk-tail {
+  top: 22px;
+  right: -6px;
+  transform: rotate(-45deg);
+}
+
+.mascot-talk-bubble[data-place="right"] .mascot-talk-tail {
+  top: 22px;
+  left: -6px;
+  transform: rotate(135deg);
 }

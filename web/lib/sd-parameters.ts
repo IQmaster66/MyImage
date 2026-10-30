@@ -1,6 +1,7 @@
+import { extractComfyUiParameters } from "@/lib/comfyui-parameters";
 import type { PngTextChunkEntry } from "@/lib/png-text-chunks";
 
-/** A1111 / 常见 WebUI 导出 PNG 的 `parameters` 文本块解析结果 */
+/** A1111 / ComfyUI 导出参数解析结果（ComfyUI 会先规范成 A1111 风格文本） */
 export type SdParsedParameters = {
   positive: string;
   negative: string;
@@ -14,7 +15,10 @@ export type SdParsedParameters = {
 const STEPS_LINE = /(?:^|[\r\n])Steps:\s*/i;
 const NEGATIVE_PROMPT = /\bNegative prompt:\s*/i;
 
-/** 从 PNG 文本块与 EXIF 中取出最可能的 SD 参数长文本 */
+/**
+ * 从 PNG 文本块与 EXIF 中取出生成参数长文本。
+ * 优先 A1111 `parameters`；若无则解析 ComfyUI 的 `prompt` / `workflow` JSON。
+ */
 export function extractStableDiffusionParameters(
   pngChunks: PngTextChunkEntry[],
   exif: Record<string, unknown> | null,
@@ -24,25 +28,28 @@ export function extractStableDiffusionParameters(
       return c.text.trim();
     }
   }
-  if (!exif) return null;
 
-  const preferKeys = ["parameters", "Parameters", "UserComment", "ImageDescription"] as const;
-  for (const key of preferKeys) {
-    const v = exif[key];
-    if (typeof v === "string" && v.trim().length > 8) {
-      const t = v.trim();
-      if (/\bSteps:\s*\d+/i.test(t) || /\bNegative prompt:/i.test(t)) return t;
+  if (exif) {
+    const preferKeys = ["parameters", "Parameters", "UserComment", "ImageDescription"] as const;
+    for (const key of preferKeys) {
+      const v = exif[key];
+      if (typeof v === "string" && v.trim().length > 8) {
+        const t = v.trim();
+        if (/\bSteps:\s*\d+/i.test(t) || /\bNegative prompt:/i.test(t)) return t;
+      }
     }
+
+    let best: string | null = null;
+    for (const v of Object.values(exif)) {
+      if (typeof v !== "string" || v.length < 20) continue;
+      if (/\bSteps:\s*\d+/.test(v) && /\bSampler:/i.test(v)) {
+        if (!best || v.length > best.length) best = v;
+      }
+    }
+    if (best) return best;
   }
 
-  let best: string | null = null;
-  for (const v of Object.values(exif)) {
-    if (typeof v !== "string" || v.length < 20) continue;
-    if (/\bSteps:\s*\d+/.test(v) && /\bSampler:/i.test(v)) {
-      if (!best || v.length > best.length) best = v;
-    }
-  }
-  return best;
+  return extractComfyUiParameters(pngChunks, exif);
 }
 
 function splitAtSteps(s: string): { before: string; fromSteps: string } {

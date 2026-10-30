@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import io
 import os
-import re
 import traceback
 from pathlib import Path
 from typing import Any, Literal
@@ -65,26 +64,40 @@ MAX_UPLOAD_BYTES = int((_mb or "12").strip() or "12") * 1024 * 1024
 
 DEFAULT_WD_MODEL = _env_or_default("WD_DEFAULT_MODEL", "wd14-convnextv2-v2")
 
-from env_paths import hf_models_root
-
-# org/name 形式的 Hub ID；强制用 HF_MODELS_ROOT 作缓存，避免 cwd 下同名文件夹误判。
-_HUB_REPO_RE = re.compile(
-    r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*/[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
-)
+from env_paths import find_cached_hub_snapshot, hf_models_root, resolve_hf_model_ref
 
 
-def _from_pretrained_kw(model_ref: str) -> dict[str, Any]:
-    ref = model_ref.strip()
-    if _HUB_REPO_RE.match(ref):
-        root = hf_models_root()
-        root.mkdir(parents=True, exist_ok=True)
-        return {"cache_dir": str(root)}
-    return {}
+def _translate_load_hint(model_ref: str, resolved: str, err: BaseException) -> str:
+    msg = str(err)
+    if "10060" not in msg and "timed out" not in msg.lower() and "Connection" not in msg:
+        return ""
+    root = hf_models_root()
+    snap = find_cached_hub_snapshot(model_ref) if "/" in model_ref else None
+    lines = [
+        " 无法连接 Hugging Face（常见于网络/防火墙）。",
+        f" 模型根目录 HF_MODELS_ROOT={root}。",
+    ]
+    if snap is not None:
+        lines.append(
+            f" 检测到本地缓存 {snap}，但加载未成功；请在 api/.hf 设置 EN_ZH_MODEL_DIR 或 ZH_EN_MODEL_DIR 为该 snapshots 路径后重启 api。"
+        )
+    else:
+        lines.append(
+            " 请用可访问 Hub 的网络预先下载模型到 .hf，或在 api/.hf 填写 snapshots 目录路径。"
+        )
+    if resolved != model_ref:
+        lines.append(f" 当前解析路径：{resolved}")
+    return "".join(lines)
 
 
 from character_routes import router as characters_router
 from character_store import init_db as init_character_db
 from storage_minio import ensure_bucket, router as minio_router
+from admin_routes import router as admin_router
+from temp_illustration_routes import router as temp_illustrations_router
+from temp_illustration_store import init_db as init_temp_illustration_db
+from prompt_library_routes import router as prompt_library_router
+from prompt_library_store import init_db as init_prompt_library_db
 from wd_tagger.interrogator import build_prompt as wd_build_prompt
 from wd_tagger.model_registry import INTERROGATORS as WD_INTERROGATORS
 from wd_tagger.model_registry import list_models as list_wd_models
@@ -106,10 +119,10 @@ def get_caption_model() -> tuple[str, Any, Any]:
         from transformers import BlipForConditionalGeneration, BlipProcessor
 
         device = _device()
-        kw = _from_pretrained_kw(CAPTION_MODEL_DIR)
+        resolved, kw = resolve_hf_model_ref(CAPTION_MODEL_DIR)
         try:
-            processor = BlipProcessor.from_pretrained(CAPTION_MODEL_DIR, **kw)
-            model = BlipForConditionalGeneration.from_pretrained(CAPTION_MODEL_DIR, **kw)
+            processor = BlipProcessor.from_pretrained(resolved, **kw)
+            model = BlipForConditionalGeneration.from_pretrained(resolved, **kw)
             model = model.to(device).eval()
         except Exception as e:
             raise RuntimeError(
@@ -138,13 +151,14 @@ def get_translate_bundle(direction: Literal["zh2en", "en2zh"]) -> tuple[Any, Any
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
     model_id = ZH_EN_MODEL_DIR if direction == "zh2en" else EN_ZH_MODEL_DIR
-    kw = _from_pretrained_kw(model_id)
+    resolved, kw = resolve_hf_model_ref(model_id)
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model_id, **kw)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_id, **kw)
+        tokenizer = AutoTokenizer.from_pretrained(resolved, **kw)
+        model = AutoModelForSeq2SeqLM.from_pretrained(resolved, **kw)
         model = model.to(_device()).eval()
     except Exception as e:
-        raise RuntimeError(f"加载翻译模型失败 ({model_id}): {e}") from e
+        hint = _translate_load_hint(model_id, resolved, e)
+        raise RuntimeError(f"加载翻译模型失败 ({model_id}): {e}.{hint}") from e
     _translate_bundles[direction] = (model, tokenizer)
     return model, tokenizer
 
@@ -155,12 +169,17 @@ app = FastAPI(title="MyImage ML", version="0.1.0")
 
 app.include_router(minio_router)
 app.include_router(characters_router)
+app.include_router(temp_illustrations_router)
+app.include_router(admin_router)
+app.include_router(prompt_library_router)
 
 
 @app.on_event("startup")
 def _startup_minio_and_characters_db():
     ensure_bucket()
     init_character_db()
+    init_temp_illustration_db()
+    init_prompt_library_db()
 
 
 app.add_middleware(
@@ -234,7 +253,12 @@ def wd_models():
 @app.post("/wd/interrogate", response_model=WdInterrogateResponse)
 async def wd_interrogate(
     file: UploadFile = File(...),
-    model: str | None = Query(None, description="wd14-convnextv2-v2 / wd14-swinv2-v2 / wd14-vit-v2"),
+    model: str | None = Query(
+        None,
+        description=(
+            "wd14-*-v2 / wd-vit-large-v3 / wd-swinv2-v3 / wd-convnext-v3 / camie-tagger-v2"
+        ),
+    ),
     threshold: float = Query(0.35, ge=0.0, le=1.0),
     replace_underscore: bool = Query(True),
 ):

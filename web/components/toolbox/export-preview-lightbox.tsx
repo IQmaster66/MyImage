@@ -6,9 +6,11 @@ import { useRef } from "react";
 type Props = {
   url: string;
   onClose: () => void;
+  /** 无障碍名称，默认「预览大图」 */
+  ariaLabel?: string;
 };
 
-export function ExportPreviewLightbox({ url, onClose }: Props) {
+export function ExportPreviewLightbox({ url, onClose, ariaLabel = "预览大图" }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
   useDialogFocusTrap(true, panelRef, {
     onEscape: onClose,
@@ -22,7 +24,7 @@ export function ExportPreviewLightbox({ url, onClose }: Props) {
       className="fixed inset-0 z-[200] flex items-center justify-center p-4 outline-none"
       role="dialog"
       aria-modal="true"
-      aria-label="导出预览大图"
+      aria-label={ariaLabel}
     >
       <div
         role="presentation"

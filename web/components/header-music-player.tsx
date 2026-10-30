@@ -1,10 +1,11 @@
 "use client";
 
 import { useDialogFocusTrap } from "@/hooks/use-dialog-focus-trap";
+import { MUSIC_TRACK_ID_KEY, subscribeMusicTrackChange } from "@/lib/header-music-control";
 import {
-  HEADER_MUSIC_TRACKS,
-  headerMusicDefaultTrackId,
+  fetchMusicTracks,
   headerMusicTrackSrc,
+  type HeaderMusicTrack,
 } from "@/lib/header-music-tracks";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,7 +15,7 @@ const LS = {
   loop: "myimage-music-loop",
   muted: "myimage-music-muted",
   spin: "myimage-music-spin",
-  trackId: "myimage-music-track-id",
+  trackId: MUSIC_TRACK_ID_KEY,
 } as const;
 
 function readFloat(key: string, fallback: number): number {
@@ -31,11 +32,13 @@ function readBool(key: string, fallback: boolean): boolean {
   return fallback;
 }
 
-function readTrackId(): string {
-  if (typeof window === "undefined") return headerMusicDefaultTrackId();
+function pickTrackId(tracks: HeaderMusicTrack[]): string {
+  if (typeof window === "undefined") return tracks[0]?.id ?? "";
   const raw = localStorage.getItem(LS.trackId)?.trim();
-  if (raw && HEADER_MUSIC_TRACKS.some((t) => t.id === raw)) return raw;
-  return headerMusicDefaultTrackId();
+  if (raw && tracks.some((t) => t.id === raw || t.fileName === raw)) {
+    return tracks.find((t) => t.id === raw || t.fileName === raw)?.id ?? tracks[0]?.id ?? "";
+  }
+  return tracks[0]?.id ?? "";
 }
 
 export function HeaderMusicPlayer() {
@@ -47,19 +50,42 @@ export function HeaderMusicPlayer() {
   const [loop, setLoop] = useState(false);
   const [muted, setMuted] = useState(false);
   const [spinWhilePlaying, setSpinWhilePlaying] = useState(true);
-  const [selectedTrackId, setSelectedTrackId] = useState(headerMusicDefaultTrackId);
+  const [tracks, setTracks] = useState<HeaderMusicTrack[]>([]);
+  const [selectedTrackId, setSelectedTrackId] = useState("");
+  const [tracksReady, setTracksReady] = useState(false);
 
   const [hydrated, setHydrated] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
   const [drawerEntered, setDrawerEntered] = useState(false);
   const drawerOpeningRef = useRef(false);
+  /** 用户是否希望继续播放（切歌时 src 变更会先 pause，不能靠 el.paused 判断） */
+  const wantPlayingRef = useRef(false);
+  const switchingTrackRef = useRef(false);
+  /** 跳过首次曲目赋值的强制 reload，避免打断正常播放状态 */
+  const skipNextTrackReloadRef = useRef(true);
+  const volumeRef = useRef(volume);
+  const mutedRef = useRef(muted);
+  const loopRef = useRef(loop);
+  volumeRef.current = volume;
+  mutedRef.current = muted;
+  loopRef.current = loop;
 
   const track = useMemo(
-    () => HEADER_MUSIC_TRACKS.find((t) => t.id === selectedTrackId) ?? HEADER_MUSIC_TRACKS[0],
-    [selectedTrackId],
+    () => tracks.find((t) => t.id === selectedTrackId) ?? tracks[0],
+    [tracks, selectedTrackId],
   );
 
-  const trackSrc = useMemo(() => headerMusicTrackSrc(track.fileName), [track.fileName]);
+  const trackSrc = track ? headerMusicTrackSrc(track.fileName) : "";
+
+  const loadTracks = useCallback(async (preferSaved: boolean) => {
+    const list = await fetchMusicTracks();
+    setTracks(list);
+    setSelectedTrackId((current) => {
+      if (!preferSaved && current && list.some((t) => t.id === current)) return current;
+      return pickTrackId(list);
+    });
+    setTracksReady(true);
+  }, []);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -67,10 +93,10 @@ export function HeaderMusicPlayer() {
       setLoop(readBool(LS.loop, false));
       setMuted(readBool(LS.muted, false));
       setSpinWhilePlaying(readBool(LS.spin, true));
-      setSelectedTrackId(readTrackId());
       setHydrated(true);
     });
-  }, []);
+    void loadTracks(true).catch(() => setTracksReady(true));
+  }, [loadTracks]);
 
   useEffect(() => {
     const el = audioRef.current;
@@ -101,27 +127,86 @@ export function HeaderMusicPlayer() {
   }, [spinWhilePlaying, hydrated]);
 
   useEffect(() => {
-    if (!hydrated || typeof window === "undefined") return;
+    if (!hydrated || !tracksReady || typeof window === "undefined" || !selectedTrackId) return;
     localStorage.setItem(LS.trackId, selectedTrackId);
-  }, [selectedTrackId, hydrated]);
+  }, [selectedTrackId, hydrated, tracksReady]);
 
-  /** 切换曲目时从头加载；若正在播则切歌后继续播 */
-  useEffect(() => {
+  const playMusic = useCallback(() => {
     const el = audioRef.current;
     if (!el) return;
-    const wasPlaying = !el.paused;
+    wantPlayingRef.current = true;
+    setPlaying(true);
+    void el.play().catch(() => {
+      wantPlayingRef.current = false;
+      setPlaying(false);
+    });
+  }, []);
+
+  const pauseMusic = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    wantPlayingRef.current = false;
+    setPlaying(false);
     el.pause();
-    el.currentTime = 0;
-    void el.load();
-    if (wasPlaying) void el.play().catch(() => {});
-  }, [track.id]);
+  }, []);
+
+  const toggle = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (el.paused) playMusic();
+    else pauseMusic();
+  }, [pauseMusic, playMusic]);
+
+  /** 桌宠等外部请求切歌 / 播放 */
+  useEffect(() => {
+    return subscribeMusicTrackChange((detail) => {
+      if (detail.action === "play") {
+        playMusic();
+        return;
+      }
+      if (detail.action === "pause") {
+        pauseMusic();
+        return;
+      }
+      if (detail.action === "toggle") {
+        toggle();
+        return;
+      }
+      setSelectedTrackId((current) => {
+        if (!tracks.length) return current;
+        if (detail.action === "set") {
+          return tracks.some((t) => t.id === detail.trackId) ? detail.trackId : current;
+        }
+        const idx = tracks.findIndex((t) => t.id === current);
+        const safeIdx = idx >= 0 ? idx : 0;
+        if (detail.action === "next") {
+          return tracks[(safeIdx + 1) % tracks.length]?.id ?? current;
+        }
+        return tracks[(safeIdx - 1 + tracks.length) % tracks.length]?.id ?? current;
+      });
+    });
+  }, [tracks, playMusic, pauseMusic, toggle]);
 
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onEnded = () => setPlaying(false);
+    const onPlay = () => {
+      setPlaying(true);
+      wantPlayingRef.current = true;
+    };
+    const onPause = () => {
+      // 切歌中的 pause：保持「正在播放」UI（图标继续转），不清除意图
+      if (switchingTrackRef.current) {
+        if (wantPlayingRef.current) setPlaying(true);
+        return;
+      }
+      setPlaying(false);
+      wantPlayingRef.current = false;
+    };
+    const onEnded = () => {
+      setPlaying(false);
+      if (!el.loop) wantPlayingRef.current = false;
+    };
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
     el.addEventListener("ended", onEnded);
@@ -130,9 +215,77 @@ export function HeaderMusicPlayer() {
       el.removeEventListener("pause", onPause);
       el.removeEventListener("ended", onEnded);
     };
-  }, [track.id]);
+  }, []);
+
+  /** 切换曲目时重新加载；若用户本在播放则等可播后继续 */
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !track) return;
+
+    const applyAudioPrefs = () => {
+      el.volume = volumeRef.current;
+      el.muted = mutedRef.current;
+      el.loop = loopRef.current;
+    };
+
+    // 首次列表就绪：只同步音量等，不要 pause/load（否则会把 playing 打掉）
+    if (skipNextTrackReloadRef.current) {
+      skipNextTrackReloadRef.current = false;
+      applyAudioPrefs();
+      return;
+    }
+
+    const resume = wantPlayingRef.current;
+    switchingTrackRef.current = true;
+    if (resume) setPlaying(true);
+
+    const finishSwitch = () => {
+      switchingTrackRef.current = false;
+      applyAudioPrefs();
+      if (!resume) return;
+      void el
+        .play()
+        .then(() => {
+          setPlaying(true);
+          wantPlayingRef.current = true;
+        })
+        .catch(() => {
+          wantPlayingRef.current = false;
+          setPlaying(false);
+        });
+    };
+
+    applyAudioPrefs();
+    el.pause();
+    try {
+      el.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+
+    const onReady = () => {
+      el.removeEventListener("canplay", onReady);
+      finishSwitch();
+    };
+    el.addEventListener("canplay", onReady);
+    void el.load();
+
+    const t = window.setTimeout(() => {
+      if (switchingTrackRef.current) {
+        el.removeEventListener("canplay", onReady);
+        finishSwitch();
+      }
+    }, 2500);
+
+    return () => {
+      window.clearTimeout(t);
+      el.removeEventListener("canplay", onReady);
+      switchingTrackRef.current = false;
+    };
+  }, [track?.id]);
 
   const openSettings = useCallback(() => {
+    void loadTracks(false).catch(() => {});
     drawerOpeningRef.current = true;
     setShowDrawer(true);
     queueMicrotask(() => {
@@ -140,7 +293,7 @@ export function HeaderMusicPlayer() {
         window.requestAnimationFrame(() => setDrawerEntered(true));
       });
     });
-  }, []);
+  }, [loadTracks]);
 
   const closeDrawer = useCallback(() => {
     setDrawerEntered(false);
@@ -171,16 +324,6 @@ export function HeaderMusicPlayer() {
     onEscape: closeDrawer,
     lockBodyScroll: true,
   });
-
-  const toggle = useCallback(() => {
-    const el = audioRef.current;
-    if (!el) return;
-    if (el.paused) {
-      void el.play().catch(() => {});
-    } else {
-      el.pause();
-    }
-  }, []);
 
   const iconBtn =
     "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-green-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-green-500 dark:focus-visible:ring-offset-gray-900";
@@ -238,21 +381,22 @@ export function HeaderMusicPlayer() {
                     </label>
                     <select
                       id="music-track"
-                      value={selectedTrackId}
+                      value={track?.id ?? ""}
+                      disabled={!tracks.length}
                       onChange={(e) => setSelectedTrackId(e.target.value)}
                       className={selectClass}
                     >
-                      {HEADER_MUSIC_TRACKS.map((t) => (
+                      {!tracks.length ? <option value="">暂无歌曲</option> : null}
+                      {tracks.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.title}
                         </option>
                       ))}
                     </select>
                     <p className="mt-1.5 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-                      更多歌曲：将 mp3 放入 <code className="rounded bg-gray-100 px-1 py-0.5 text-[10px] dark:bg-zinc-800">public/music/</code>
-                      ，并在{" "}
-                      <code className="rounded bg-gray-100 px-1 py-0.5 text-[10px] dark:bg-zinc-800">lib/header-music-tracks.ts</code>{" "}
-                      中登记。
+                      把 mp3 放进{" "}
+                      <code className="rounded bg-gray-100 px-1 py-0.5 text-[10px] dark:bg-zinc-800">public/music/</code>
+                      即可出现在列表里。打开本设置时会重新扫描。
                     </p>
                   </div>
 
@@ -320,7 +464,7 @@ export function HeaderMusicPlayer() {
   return (
     <>
       <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-        <audio ref={audioRef} src={trackSrc} preload="metadata" loop={loop} className="hidden" />
+        <audio ref={audioRef} src={trackSrc || undefined} preload="metadata" loop={loop} className="hidden" />
 
         <button
           type="button"

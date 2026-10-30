@@ -1,14 +1,20 @@
 "use client";
 
+import { usePromptCategories } from "@/hooks/use-prompt-categories";
+import { fileToUploadableImageBlob } from "@/lib/character-image";
+import { postUploadPromptPreviewImage } from "@/lib/ml-api";
+import { resolvePromptPreviewSrc, tryDeletePromptPreviewKey } from "@/lib/prompt-preview-image";
+import { putPrompt } from "@/lib/prompts-db";
 import {
+  flattenCategoryOptions,
   newPromptEntry,
   parseTagsInput,
   PROMPT_KIND_LABELS,
+  UNCATEGORIZED_ID,
   type PromptEntry,
   type PromptKind,
 } from "@/lib/prompts-types";
-import { putPrompt } from "@/lib/prompts-db";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   open: boolean;
@@ -17,6 +23,8 @@ type Props = {
   defaultTitle?: string;
   defaultBody?: string;
   defaultKind?: PromptKind;
+  /** 新建时默认分类 */
+  defaultCategoryId?: string;
   onClose: () => void;
   onSaved: () => void;
 };
@@ -27,34 +35,96 @@ export function PromptEditorModal({
   defaultTitle = "",
   defaultBody = "",
   defaultKind = "positive",
+  defaultCategoryId = UNCATEGORIZED_ID,
   onClose,
   onSaved,
 }: Props) {
+  const { categories } = usePromptCategories();
+  const categoryOptions = useMemo(() => flattenCategoryOptions(categories), [categories]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [kind, setKind] = useState<PromptKind>("positive");
+  const [categoryId, setCategoryId] = useState(UNCATEGORIZED_ID);
   const [tagsStr, setTagsStr] = useState("");
   const [favorited, setFavorited] = useState(false);
+  const [pickedPreviewKey, setPickedPreviewKey] = useState<string | null>(null);
+  const [previewRemoved, setPreviewRemoved] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState("");
+  const [imageBusy, setImageBusy] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const blobUrlRef = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const clearBlobPreview = () => {
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+  };
+
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      clearBlobPreview();
+      return;
+    }
     setErr(null);
+    setPickedPreviewKey(null);
+    setPreviewRemoved(false);
+    clearBlobPreview();
     if (entry) {
       setTitle(entry.title);
       setBody(entry.body);
       setKind(entry.kind);
+      setCategoryId(entry.categoryId || UNCATEGORIZED_ID);
       setTagsStr(entry.tags.join(", "));
       setFavorited(entry.favorited);
-    } else {
-      setTitle(defaultTitle || "未命名片段");
-      setBody(defaultBody);
-      setKind(defaultKind);
-      setTagsStr("");
-      setFavorited(false);
+      setPreviewSrc("");
+      let cancelled = false;
+      void resolvePromptPreviewSrc(entry).then((u) => {
+        if (!cancelled && u) setPreviewSrc(u);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [open, entry, defaultTitle, defaultBody, defaultKind]);
+    setTitle(defaultTitle || "未命名片段");
+    setBody(defaultBody);
+    setKind(defaultKind);
+    setCategoryId(defaultCategoryId || UNCATEGORIZED_ID);
+    setTagsStr("");
+    setFavorited(false);
+    setPreviewSrc("");
+    return undefined;
+  }, [open, entry, defaultTitle, defaultBody, defaultKind, defaultCategoryId]);
+
+  const onPickPreviewImage = async (file: File | undefined) => {
+    if (!file) return;
+    setImageBusy(true);
+    setErr(null);
+    try {
+      const { blob, filename } = await fileToUploadableImageBlob(file);
+      const { object_key } = await postUploadPromptPreviewImage(blob, filename);
+      clearBlobPreview();
+      const u = URL.createObjectURL(blob);
+      blobUrlRef.current = u;
+      setPreviewSrc(u);
+      setPickedPreviewKey(object_key);
+      setPreviewRemoved(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "上传失败（请确认 ML API 与 MinIO 已启动）");
+    } finally {
+      setImageBusy(false);
+      if (imageInputRef.current) imageInputRef.current.value = "";
+    }
+  };
+
+  const removePreview = () => {
+    clearBlobPreview();
+    setPreviewSrc("");
+    setPickedPreviewKey(null);
+    setPreviewRemoved(true);
+  };
 
   if (!open) return null;
 
@@ -63,23 +133,38 @@ export function PromptEditorModal({
     setErr(null);
     try {
       const tags = parseTagsInput(tagsStr);
+      const previousKey = entry?.previewImageKey;
+      const finalKey = previewRemoved
+        ? undefined
+        : pickedPreviewKey ?? (entry?.previewImageKey?.trim() || undefined);
+
       if (entry) {
-        await putPrompt({
+        const next: PromptEntry = {
           ...entry,
           title: title.trim() || "未命名",
           body,
           kind,
+          categoryId,
           tags,
           favorited,
           updatedAt: Date.now(),
-        });
+        };
+        delete next.previewImage;
+        if (finalKey) next.previewImageKey = finalKey;
+        else delete next.previewImageKey;
+        await putPrompt(next);
+        if (previousKey && previousKey !== finalKey) {
+          await tryDeletePromptPreviewKey(previousKey);
+        }
       } else {
         const row = newPromptEntry({
           title: title.trim() || "未命名",
           body,
           kind,
+          categoryId,
           tags,
           favorited,
+          previewImageKey: finalKey,
         });
         await putPrompt(row);
       }
@@ -129,6 +214,21 @@ export function PromptEditorModal({
             />
           </label>
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+            分类
+            <select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-zinc-950 dark:text-gray-100"
+            >
+              <option value={UNCATEGORIZED_ID}>未分类</option>
+              {categoryOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
             类型
             <select
               value={kind}
@@ -143,14 +243,61 @@ export function PromptEditorModal({
             </select>
           </label>
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-            标签（逗号分隔）
+            标签（逗号分隔，可选）
             <input
               value={tagsStr}
               onChange={(e) => setTagsStr(e.target.value)}
-              placeholder="例如：人物, 光影"
+              placeholder="例如：金发, 室内"
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-zinc-950 dark:text-gray-100"
             />
           </label>
+          <div className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+            <span>效果参考图（可选）</span>
+            <div className="mt-1.5 flex flex-wrap items-start gap-3">
+              {previewSrc && !previewRemoved ? (
+                <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-zinc-950">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={previewSrc}
+                    alt="效果参考图预览"
+                    className="h-24 w-24 object-cover sm:h-28 sm:w-28"
+                  />
+                </div>
+              ) : (
+                <div
+                  className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 text-[10px] leading-snug text-gray-400 sm:h-28 sm:w-28 dark:border-gray-600 dark:bg-zinc-950"
+                >
+                  未导入
+                </div>
+              )}
+              <div className="flex min-w-[10rem] flex-1 flex-col gap-2">
+                <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-zinc-950 dark:text-gray-100 dark:hover:bg-zinc-800">
+                  {imageBusy ? "上传中…" : "选择图片"}
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    disabled={imageBusy || busy}
+                    onChange={(e) => void onPickPreviewImage(e.target.files?.[0])}
+                  />
+                </label>
+                {previewSrc && !previewRemoved ? (
+                  <button
+                    type="button"
+                    disabled={imageBusy || busy}
+                    onClick={removePreview}
+                    className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-red-950/30"
+                  >
+                    移除图片
+                  </button>
+                ) : null}
+                <p className="text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">
+                  图片上传到 MinIO（prompt-previews/），词库条目只保存对象键；需 ML API 与 MinIO 可用。
+                </p>
+              </div>
+            </div>
+          </div>
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
             正文
             <textarea

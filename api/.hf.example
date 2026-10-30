@@ -14,14 +14,25 @@
 # 模型根目录（文件夹路径）。相对路径相对于 api/；不写则等价于 ../.hf
 # HF_MODELS_ROOT=../.hf
 
-# BLIP / Marian：填本机 snapshots（含 config.json）或留空用 Hub ID + 上面缓存目录
+# BLIP / Marian：填本机 snapshots（含 config.json + pytorch_model.bin）或留空用 Hub ID
+# 留空时若已在 HF_MODELS_ROOT 下载过，会自动用 snapshots 且不再联网（避免 WinError 10060）
 CAPTION_MODEL_DIR=
 ZH_EN_MODEL_DIR=
 EN_ZH_MODEL_DIR=
+# 也可显式指定（把下面 commit 换成你 .hf 里 snapshots 下的文件夹名）：
+# EN_ZH_MODEL_DIR=../.hf/models--Helsinki-NLP--opus-mt-en-zh/snapshots/408d9bc410a388e1d9aef112a2daba955b945255
+# ZH_EN_MODEL_DIR=../.hf/models--Helsinki-NLP--opus-mt-zh-en/snapshots/cf109095479db38d6df799875e34039d4938aaa6
 
-# WD14 ONNX：指向含 model.onnx + selected_tags.csv 的 snapshots 目录（也可用相对 HF_MODELS_ROOT 的路径）
-# WD_CONVNEXTV2_PATH=../.hf/models--SmilingWolf--wd-v1-4-convnextv2-tagger-v2/snapshots/bf364499ea843a403cc2770072f31f5cfb2ffa58
-# WD_SWINV2_PATH=../.hf/models--SmilingWolf--wd-v1-4-swinv2-tagger-v2/snapshots/8350dd529d920aab46156928654cba67c71dc348
+# WD14 / WD v3 ONNX：指向含 model.onnx + selected_tags.csv 的 snapshots 目录
+# WD_CONVNEXTV2_PATH=../.hf/models--SmilingWolf--wd-v1-4-convnextv2-tagger-v2/snapshots/...
+# WD_SWINV2_PATH=../.hf/models--SmilingWolf--wd-v1-4-swinv2-tagger-v2/snapshots/...
 # WD_VIT_PATH=
-# WD_DEFAULT_MODEL=wd14-convnextv2-v2
+# WD_VIT_LARGE_V3_PATH=../.hf/models--SmilingWolf--wd-vit-large-tagger-v3/snapshots/...
+# WD_SWINV2_V3_PATH=../.hf/models--SmilingWolf--wd-swinv2-tagger-v3/snapshots/...
+# WD_CONVNEXT_V3_PATH=../.hf/models--SmilingWolf--wd-convnext-tagger-v3/snapshots/...
+#
+# Camie Tagger v2：指向含 camie-tagger-v2.onnx + camie-tagger-v2-metadata.json 的目录
+# CAMIE_TAGGER_PATH=../.hf/models--Camais03--camie-tagger-v2/snapshots/...
+#
+# WD_DEFAULT_MODEL=wd-vit-large-v3
 # WD_USE_CPU=false

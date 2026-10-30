@@ -160,7 +160,7 @@ export function ImageToolboxMetadataDetails({
             <p className="mt-1 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
               本地解析上传文件：PNG 的 tEXt / zTXt / iTXt（如 Stable Diffusion WebUI 的{" "}
               <code className="rounded bg-gray-100 px-1 dark:bg-zinc-800">parameters</code>）；JPEG 等的 EXIF / IPTC /
-              XMP。画布导出的处理图本身不带这些字段；若选「归档」导出策略，会额外下载原始文件副本以保留完整元数据。
+              XMP。上方「元数据导出」可一键去除元数据并另存；编辑页的画布导出本身也不含元数据字段。
             </p>
           </div>
           <button

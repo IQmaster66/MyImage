@@ -1,8 +1,12 @@
 "use client";
 
-import { SdParametersCard } from "@/components/toolbox/sd-parameters-card";
 import { TempIllustrationRemoveConfirmDialog } from "@/components/temp-illustration/temp-illustration-remove-confirm";
-import { deleteTempIllustration, type TempIllustrationEntry } from "@/lib/temp-illustration-db";
+import { ExportPreviewLightbox } from "@/components/toolbox/export-preview-lightbox";
+import { SdParametersCard } from "@/components/toolbox/sd-parameters-card";
+import { useBodyScrollLock } from "@/hooks/use-body-scroll-lock";
+import { deleteTempIllustration, fetchTempIllustrationBlob } from "@/lib/temp-illustration-api";
+import type { TempIllustrationEntry } from "@/lib/temp-illustration-types";
+import { fetchMinioReadUrl } from "@/lib/ml-api";
 import { queueToolboxHandoff } from "@/lib/toolbox-handoff";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -20,26 +24,43 @@ export function TempIllustrationDetailModal({ entry, onClose, onDeleted }: Props
   const [removeBusy, setRemoveBusy] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffErr, setHandoffErr] = useState<string | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  useBodyScrollLock(Boolean(entry));
 
   useEffect(() => {
     if (!entry) {
       setObjectUrl(null);
       return;
     }
-    const u = URL.createObjectURL(entry.blob);
-    setObjectUrl(u);
-    return () => URL.revokeObjectURL(u);
+    let cancelled = false;
+    setObjectUrl(null);
+    void fetchMinioReadUrl(entry.imageKey)
+      .then((u) => {
+        if (!cancelled) setObjectUrl(u);
+      })
+      .catch(() => {
+        if (!cancelled) setObjectUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [entry]);
 
   useEffect(() => {
     setShowRemoveConfirm(false);
     setHandoffErr(null);
+    setLightboxOpen(false);
   }, [entry?.id]);
 
   if (!entry) return null;
 
   const dismissOrClose = () => {
     if (removeBusy) return;
+    if (lightboxOpen) {
+      setLightboxOpen(false);
+      return;
+    }
     if (showRemoveConfirm) {
       setShowRemoveConfirm(false);
       return;
@@ -81,14 +102,25 @@ export function TempIllustrationDetailModal({ entry, onClose, onDeleted }: Props
             ✕
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="flex justify-center bg-gray-100/80 p-3 dark:bg-zinc-950/80">
             {objectUrl ? (
-              <img
-                src={objectUrl}
-                alt=""
-                className="max-h-[min(40dvh,28rem)] max-w-full rounded-lg object-contain shadow-md"
-              />
+              <button
+                type="button"
+                onClick={() => setLightboxOpen(true)}
+                aria-label="放大查看图片"
+                className="group relative max-w-full rounded-lg p-0 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={objectUrl}
+                  alt=""
+                  className="max-h-[min(40dvh,28rem)] max-w-full cursor-zoom-in rounded-lg object-contain shadow-md transition group-hover:brightness-[0.97]"
+                />
+                <span className="pointer-events-none absolute bottom-2 right-2 rounded-md bg-black/55 px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow transition group-hover:opacity-100">
+                  点击放大
+                </span>
+              </button>
             ) : (
               <div className="flex h-40 items-center text-sm text-gray-500">加载预览…</div>
             )}
@@ -99,9 +131,9 @@ export function TempIllustrationDetailModal({ entry, onClose, onDeleted }: Props
             ) : (
               <div className="space-y-3 rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-3 text-xs text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-100">
                 <p>
-                  此图未检测到 SD / A1111 参数（可能来自无 embedded metadata 的导出图或相机照片）。可转到工具箱使用{" "}
-                  <strong className="font-semibold">BLIP 图片反推</strong> 或 <strong className="font-semibold">WD 标签反推</strong>{" "}
-                  生成描述或标签。
+                  此图未检测到 SD / A1111 / ComfyUI 参数（可能来自去元数据导出或相机照片）。可转到工具箱使用{" "}
+                  <strong className="font-semibold">BLIP 图片反推</strong> 或{" "}
+                  <strong className="font-semibold">WD 标签反推</strong> 生成描述或标签。
                 </p>
                 {handoffErr ? (
                   <p className="rounded-md border border-red-300/80 bg-red-50/90 px-2 py-1.5 text-[11px] text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
@@ -114,11 +146,14 @@ export function TempIllustrationDetailModal({ entry, onClose, onDeleted }: Props
                   onClick={() => {
                     setHandoffErr(null);
                     setHandoffBusy(true);
-                    void queueToolboxHandoff({
-                      blob: entry.blob,
-                      mimeType: entry.mimeType,
-                      suggestedBaseName: entry.title || "temp-illustration",
-                    })
+                    void fetchTempIllustrationBlob(entry)
+                      .then((blob) =>
+                        queueToolboxHandoff({
+                          blob,
+                          mimeType: entry.mimeType,
+                          suggestedBaseName: entry.title || "temp-illustration",
+                        }),
+                      )
                       .then((hid) => {
                         router.push(`/toolbox?handoff=${encodeURIComponent(hid)}`);
                       })
@@ -166,6 +201,14 @@ export function TempIllustrationDetailModal({ entry, onClose, onDeleted }: Props
           }
         }}
       />
+
+      {lightboxOpen && objectUrl ? (
+        <ExportPreviewLightbox
+          url={objectUrl}
+          ariaLabel={`放大：${entry.title || "临时插画"}`}
+          onClose={() => setLightboxOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -3,7 +3,6 @@ api/.venv/
 api/__pycache__/
 api/**/__pycache__/
 *.py[cod]
-# api/.hf/ 若需推送可删掉本行（注意体积）
 api/data/
 
 # Node (web)
@@ -15,13 +14,15 @@ web/.vercel
 *.tsbuildinfo
 web/next-env.d.ts
 
-# 环境与密钥（勿提交）
+# 环境与密钥（勿提交；示例文件可提交）
 .env
 .env.*
 !.env.example
 !api/.env.example
 !api/.hf.example
 api/.env
+# api/.hf 为本机模型路径配置（可能含绝对路径），勿提交；请复制 .hf.example
+api/.hf
 
 # 日志与系统
 *.log
@@ -29,10 +30,18 @@ api/.env
 Thumbs.db
 *.pem
 
-# MinIO：可推送数据与脚本；可执行文件超过 GitHub 100MB 单文件上限
+# ---------- 无法 / 不应推到 GitHub 的大文件与本地数据 ----------
+# Hugging Face 模型缓存（通常数 GB～十余 GB，远超 GitHub 限制）
+.hf/
+
+# MinIO：可执行文件单文件约 100MB+，超过 GitHub 单文件 100MB 上限
 minio/minio.exe
 minio/mc.exe
+# MinIO 对象数据（人物图、临时插画等），体积大且属本机数据，勿提交
+minio/minio-data/
+!minio/minio-data/.gitkeep
 
-# Hugging Face 缓存（约 10GB+，GitHub 无法直接推送，见 README）
-# 若坚持用 Git LFS 可删除下一行并自行配置 LFS
-.hf/
+# 站点背景音乐（版权与体积；请本机放入 web/public/music/）
+web/public/music/**
+!web/public/music/.gitkeep
+!web/public/music/README.md

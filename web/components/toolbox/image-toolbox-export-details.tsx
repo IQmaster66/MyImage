@@ -1,6 +1,6 @@
 "use client";
 
-import { DEFAULT_COLOR_ADJUST, type ColorAdjust, type ExportFormat } from "@/lib/image-toolbox";
+import { DEFAULT_COLOR_ADJUST, EXPORT_FORMAT_CHOICES, exportFormatUsesQuality, type ColorAdjust, type ExportFormat } from "@/lib/image-toolbox";
 import type { Dispatch, SetStateAction } from "react";
 
 export type ImageToolboxExportDetailsProps = {
@@ -31,6 +31,8 @@ export type ImageToolboxExportDetailsProps = {
   setWatermarkText: Dispatch<SetStateAction<string>>;
   watermarkOpacity: number;
   setWatermarkOpacity: Dispatch<SetStateAction<number>>;
+  /** 为 true 时隐藏底部「导出下载」（由侧栏固定栏承担） */
+  hideDownloadButton?: boolean;
 };
 
 export function ImageToolboxExportDetails({
@@ -61,6 +63,7 @@ export function ImageToolboxExportDetails({
   setWatermarkText,
   watermarkOpacity,
   setWatermarkOpacity,
+  hideDownloadButton = false,
 }: ImageToolboxExportDetailsProps) {
   return (
     <details open className="rounded-lg border border-gray-100 dark:border-gray-700/80">
@@ -116,12 +119,14 @@ export function ImageToolboxExportDetails({
               onChange={(e) => setFormat(e.target.value as ExportFormat)}
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
             >
-              <option value="image/png">PNG（无损，体积大）</option>
-              <option value="image/jpeg">JPEG（体积小，有损）</option>
-              <option value="image/webp">WebP（推荐）</option>
+              {EXPORT_FORMAT_CHOICES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
             </select>
           </label>
-          {format !== "image/png" ? (
+          {exportFormatUsesQuality(format) ? (
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
               质量 {(quality * 100).toFixed(0)}%
               <input
@@ -284,14 +289,16 @@ export function ImageToolboxExportDetails({
             ) : null}
           </div>
 
-          <button
-            type="button"
-            disabled={!previewUrl || busy}
-            onClick={() => void handleExport()}
-            className="w-full rounded-lg bg-green-600 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {busy ? "处理中…" : "导出下载"}
-          </button>
+          {!hideDownloadButton ? (
+            <button
+              type="button"
+              disabled={!previewUrl || busy}
+              onClick={() => void handleExport()}
+              className="w-full rounded-lg bg-green-600 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy ? "处理中…" : "导出下载"}
+            </button>
+          ) : null}
         </div>
 
         <div className="space-y-4 border-t border-gray-200 pt-4 dark:border-gray-700">

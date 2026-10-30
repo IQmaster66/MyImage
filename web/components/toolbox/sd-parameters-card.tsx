@@ -2,6 +2,7 @@
 
 import { CopyFeedbackToast } from "@/components/copy-status-banner";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isComfyUiFormattedParameters } from "@/lib/comfyui-parameters";
 import {
   orderedSdFields,
   parseA1111Parameters,
@@ -90,11 +91,20 @@ export function SdParametersCard({ raw }: Props) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-          SD 参数解析
+          {isComfyUiFormattedParameters(raw) ? "ComfyUI 参数解析" : "SD 参数解析"}
         </h3>
         <p className="text-[10px] text-gray-500 dark:text-gray-500">
-          自 PNG <code className="rounded bg-gray-100 px-0.5 dark:bg-zinc-800">parameters</code> 或
-          EXIF 中解析（A1111 等）
+          {isComfyUiFormattedParameters(raw) ? (
+            <>
+              自 PNG <code className="rounded bg-gray-100 px-0.5 dark:bg-zinc-800">prompt</code> /{" "}
+              <code className="rounded bg-gray-100 px-0.5 dark:bg-zinc-800">workflow</code> 解析
+            </>
+          ) : (
+            <>
+              自 PNG <code className="rounded bg-gray-100 px-0.5 dark:bg-zinc-800">parameters</code> 或
+              EXIF 中解析（A1111 等）
+            </>
+          )}
         </p>
       </div>
 

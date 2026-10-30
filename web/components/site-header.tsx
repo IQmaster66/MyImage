@@ -1,13 +1,15 @@
 "use client";
 
 import { HeaderMusicPlayer } from "@/components/header-music-player";
+import { InspirationLinksList } from "@/components/inspiration-links-list";
+import { INSPIRATION_SECTION_LABEL } from "@/lib/inspiration-links";
+import { applyTheme } from "@/lib/theme";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
-  useMemo,
   useState,
   useSyncExternalStore,
   type KeyboardEvent,
@@ -49,7 +51,7 @@ export function SiteHeader() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const [showRecentDropdown, setShowRecentDropdown] = useState(false);
+  const [showInspirationDropdown, setShowInspirationDropdown] = useState(false);
 
   const isDark = useSyncExternalStore(
     subscribeDarkMode,
@@ -60,8 +62,8 @@ export function SiteHeader() {
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as HTMLElement;
-      if (!target.closest(".recent-dropdown-root")) {
-        setShowRecentDropdown(false);
+      if (!target.closest(".inspiration-dropdown-root")) {
+        setShowInspirationDropdown(false);
       }
     }
     document.addEventListener("click", handleClickOutside);
@@ -69,14 +71,8 @@ export function SiteHeader() {
   }, []);
 
   const toggleTheme = useCallback(() => {
-    const next = !document.documentElement.classList.contains("dark");
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("theme", next ? "dark" : "light");
+    applyTheme(!document.documentElement.classList.contains("dark"));
   }, []);
-
-  const recentItems = useMemo<
-    { id: string; title: string; thumbnail?: string; viewTime: Date }[]
-  >(() => [], []);
 
   const handleSearch = useCallback(() => {
     const q = searchQuery.trim();
@@ -93,7 +89,10 @@ export function SiteHeader() {
   );
 
   return (
-    <header className="relative z-50 shrink-0 border-b border-gray-200 bg-white shadow-md transition-colors dark:border-gray-800 dark:bg-gray-900">
+    <header
+      className="sticky top-0 z-50 shrink-0 border-b border-gray-200 bg-white shadow-md dark:border-gray-800 dark:bg-gray-900"
+      style={{ paddingRight: "var(--scroll-lock-pad, 0px)" }}
+    >
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="grid h-16 min-h-[4rem] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 sm:gap-x-4">
           {/* 左侧：Logo 与品牌名（OrangeImage Header.vue） */}
@@ -105,12 +104,13 @@ export function SiteHeader() {
               <div className="relative shrink-0">
                 <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-green-400 to-green-600 opacity-0 blur-sm transition-opacity duration-200 group-hover:opacity-50" />
                 <Image
-                  src="/logo.png"
+                  src="/logo/orange-logo.png"
                   alt="Orange Logo"
                   width={44}
                   height={44}
-                  className="relative h-10 w-10 rounded-lg object-contain shadow-sm transition-all duration-200 group-hover:shadow-md sm:h-11 sm:w-11"
+                  className="relative h-10 w-10 object-contain drop-shadow-sm transition-[filter,transform] duration-200 group-hover:drop-shadow-md sm:h-11 sm:w-11 dark:drop-shadow-[0_1px_2px_rgba(0,0,0,0.55)]"
                   priority
+                  unoptimized
                 />
               </div>
               <span className="truncate bg-gradient-to-r from-green-500 via-green-600 to-green-700 bg-clip-text text-lg leading-none font-bold tracking-tight text-transparent transition-all duration-200 group-hover:from-green-600 group-hover:via-green-700 group-hover:to-green-800 sm:text-xl">
@@ -128,7 +128,7 @@ export function SiteHeader() {
               <Link
                 key={item.path}
                 href={item.path}
-                className={`rounded-lg px-2.5 py-2 text-sm leading-none font-medium tracking-wide whitespace-nowrap transition-all duration-200 lg:px-3.5 ${
+                className={`rounded-lg px-2.5 py-2 text-sm leading-none font-medium tracking-wide whitespace-nowrap transition-colors duration-150 lg:px-3.5 ${
                   isNavActive(pathname, item.path)
                     ? "bg-green-50 text-green-600 dark:bg-green-900/20"
                     : "text-gray-700 hover:bg-gray-50 hover:text-green-600 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-green-500"
@@ -143,18 +143,18 @@ export function SiteHeader() {
           <div className="flex min-w-0 shrink-0 items-center justify-end gap-1 sm:gap-1.5 lg:gap-2">
             <HeaderMusicPlayer />
 
-            <div className="recent-dropdown-root relative">
+            <div className="inspiration-dropdown-root relative">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setShowRecentDropdown((v) => !v);
+                  setShowInspirationDropdown((v) => !v);
                 }}
-                aria-expanded={showRecentDropdown}
+                aria-expanded={showInspirationDropdown}
                 aria-haspopup="true"
-                aria-label="最近观看"
+                aria-label={INSPIRATION_SECTION_LABEL}
                 className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-green-600 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-green-500"
-                title="最近观看"
+                title={INSPIRATION_SECTION_LABEL}
               >
                 <svg
                   className="h-5 w-5"
@@ -167,46 +167,21 @@ export function SiteHeader() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth={2}
-                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
                   />
                 </svg>
-                {recentItems.length > 0 ? (
-                  <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-green-500" />
-                ) : null}
               </button>
 
-              {showRecentDropdown ? (
+              {showInspirationDropdown ? (
                 <div
-                  className="absolute top-full left-2 z-50 mt-3 w-80 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"
+                  className="absolute top-full right-0 z-50 mt-3 w-64 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"
                   onClick={(e) => e.stopPropagation()}
                   role="presentation"
                 >
-                  <div className="flex items-center justify-between bg-gradient-to-r from-green-500 to-green-600 px-4 py-3">
-                    <h3 className="text-sm font-semibold text-white">
-                      最近观看
-                    </h3>
-                  </div>
-                  <div className="max-h-96 overflow-y-auto">
-                    <div className="p-8 text-center">
-                      <svg
-                        className="mx-auto mb-3 h-12 w-12 text-gray-400 dark:text-gray-500"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        aria-hidden
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                        />
-                      </svg>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        暂无最近观看记录
-                      </p>
-                    </div>
-                  </div>
+                  <InspirationLinksList
+                    variant="dropdown"
+                    onNavigate={() => setShowInspirationDropdown(false)}
+                  />
                 </div>
               ) : null}
             </div>
@@ -383,7 +358,7 @@ export function SiteHeader() {
                 <Link
                   key={item.path}
                   href={item.path}
-                  className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-150 ${
                     isNavActive(pathname, item.path)
                       ? "bg-green-50 text-green-600 dark:bg-green-900/20"
                       : "text-gray-700 hover:bg-gray-50 hover:text-green-600 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-green-500"

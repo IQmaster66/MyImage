@@ -1,27 +1,44 @@
 "use client";
 
-import { createCharacter, deleteCharacterApi, updateCharacter } from "@/lib/character-api";
+import { ExportPreviewLightbox } from "@/components/toolbox/export-preview-lightbox";
+import { useBodyScrollLock } from "@/hooks/use-body-scroll-lock";
+import { createCharacter, deleteCharacterApi, fetchCharacterSources, updateCharacter } from "@/lib/character-api";
 import { fileToUploadableImageBlob } from "@/lib/character-image";
-import type { CharacterEntry } from "@/lib/character-types";
+import {
+  flattenSourceOptions,
+  UNCATEGORIZED_SOURCE_ID,
+  type CharacterEntry,
+  type CharacterSource,
+} from "@/lib/character-types";
 import { deleteMinioObject, fetchMinioReadUrl, postUploadCharacterImage } from "@/lib/ml-api";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   open: boolean;
   entry: CharacterEntry | null;
+  /** 新建时默认出自（例如当前侧栏筛选） */
+  defaultSourceId?: string;
   onClose: () => void;
   onSaved: () => void;
 };
 
-export function CharacterEditorModal({ open, entry, onClose, onSaved }: Props) {
+export function CharacterEditorModal({ open, entry, defaultSourceId, onClose, onSaved }: Props) {
   const [name, setName] = useState("");
-  const [prompt, setPrompt] = useState("");
+  const [promptClothed, setPromptClothed] = useState("");
+  const [promptUnclothed, setPromptUnclothed] = useState("");
+  const [sourceId, setSourceId] = useState(UNCATEGORIZED_SOURCE_ID);
+  const [sources, setSources] = useState<CharacterSource[]>([]);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   const [previewSrc, setPreviewSrc] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const blobUrlRef = useRef<string | null>(null);
+
+  const sourceOptions = useMemo(() => flattenSourceOptions(sources), [sources]);
+
+  useBodyScrollLock(open);
 
   const clearBlobPreview = () => {
     if (blobUrlRef.current) {
@@ -38,13 +55,24 @@ export function CharacterEditorModal({ open, entry, onClose, onSaved }: Props) {
     setErr(null);
     setPickedKey(null);
     setShowDeleteConfirm(false);
+    setLightboxOpen(false);
     clearBlobPreview();
+
+    let cancelled = false;
+    void fetchCharacterSources()
+      .then((list) => {
+        if (!cancelled) setSources(list);
+      })
+      .catch(() => {
+        if (!cancelled) setSources([]);
+      });
 
     if (entry) {
       setName(entry.name);
-      setPrompt(entry.prompt);
+      setPromptClothed(entry.promptClothed || entry.prompt || "");
+      setPromptUnclothed(entry.promptUnclothed || "");
+      setSourceId(entry.sourceId || UNCATEGORIZED_SOURCE_ID);
       setPreviewSrc("");
-      let cancelled = false;
       void fetchMinioReadUrl(entry.imageKey)
         .then((u) => {
           if (!cancelled) setPreviewSrc(u);
@@ -58,10 +86,14 @@ export function CharacterEditorModal({ open, entry, onClose, onSaved }: Props) {
     }
 
     setName("");
-    setPrompt("");
+    setPromptClothed("");
+    setPromptUnclothed("");
+    setSourceId(defaultSourceId ?? UNCATEGORIZED_SOURCE_ID);
     setPreviewSrc("");
-    return undefined;
-  }, [open, entry?.id]);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, entry?.id, defaultSourceId]);
 
   if (!open) return null;
 
@@ -91,10 +123,6 @@ export function CharacterEditorModal({ open, entry, onClose, onSaved }: Props) {
       return;
     }
     const n = name.trim();
-    if (!n) {
-      setErr("请输入人物姓名");
-      return;
-    }
     setBusy(true);
     setErr(null);
     const uploadedThisSession = pickedKey;
@@ -102,14 +130,18 @@ export function CharacterEditorModal({ open, entry, onClose, onSaved }: Props) {
       if (entry) {
         await updateCharacter(entry.id, {
           name: n,
-          prompt: prompt.trim(),
+          promptClothed: promptClothed.trim(),
+          promptUnclothed: promptUnclothed.trim(),
+          sourceId,
           imageKey: finalKey,
         });
       } else {
         await createCharacter({
           id: crypto.randomUUID(),
           name: n,
-          prompt: prompt.trim(),
+          promptClothed: promptClothed.trim(),
+          promptUnclothed: promptUnclothed.trim(),
+          sourceId,
           imageKey: finalKey,
         });
       }
@@ -170,10 +202,10 @@ export function CharacterEditorModal({ open, entry, onClose, onSaved }: Props) {
               onClick={(e) => e.stopPropagation()}
             >
               <h3 id="delete-confirm-title" className="text-sm font-semibold text-gray-900 dark:text-gray-50">
-                删除「{entry.name}」？
+                删除「{entry.name.trim() || "未命名"}」？
               </h3>
               <p id="delete-confirm-desc" className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-                将从人物百科中移除该卡片：服务端 SQLite 中的姓名与提示词会删除，MinIO 中的封面图也会一并删除。
+                将从人物百科中移除该卡片：服务端 SQLite 中的姓名与两套提示词会删除，MinIO 中的封面图也会一并删除。
                 <span className="mt-1 block font-medium text-red-700 dark:text-red-400">此操作无法撤销。</span>
               </p>
               <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -223,41 +255,92 @@ export function CharacterEditorModal({ open, entry, onClose, onSaved }: Props) {
             <div className="mt-2 flex flex-col items-stretch gap-3 sm:flex-row sm:items-start">
               <div className="relative aspect-[3/4] w-full max-w-[10rem] shrink-0 overflow-hidden rounded-lg border border-dashed border-gray-300 bg-gray-50 dark:border-gray-600 dark:bg-zinc-950">
                 {previewSrc ? (
-                  <img src={previewSrc} alt="" className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setLightboxOpen(true)}
+                    aria-label="放大查看人物图片"
+                    className="group relative h-full w-full p-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={previewSrc}
+                      alt=""
+                      className="h-full w-full cursor-zoom-in object-cover transition group-hover:brightness-[0.92]"
+                    />
+                    <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1.5 pt-4 text-center text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+                      点击放大
+                    </span>
+                  </button>
                 ) : (
                   <div className="flex h-full min-h-[8rem] items-center justify-center px-2 text-center text-xs text-gray-400">
                     {busy ? "处理中…" : "未选择"}
                   </div>
                 )}
               </div>
-              <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-zinc-800 dark:text-gray-100 dark:hover:bg-zinc-700">
-                {previewSrc ? "更换图片" : "选择图片"}
-                <input
-                  type="file"
-                  accept="image/*"
-                  disabled={busy}
-                  className="sr-only"
-                  onChange={(e) => void onPickFile(e.target.files?.[0])}
-                />
-              </label>
+              <div className="flex flex-col gap-2">
+                <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-zinc-800 dark:text-gray-100 dark:hover:bg-zinc-700">
+                  {previewSrc ? "更换图片" : "选择图片"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={busy}
+                    className="sr-only"
+                    onChange={(e) => void onPickFile(e.target.files?.[0])}
+                  />
+                </label>
+                {previewSrc ? (
+                  <button
+                    type="button"
+                    onClick={() => setLightboxOpen(true)}
+                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-100 dark:hover:bg-emerald-950/70"
+                  >
+                    放大查看
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-            人物姓名
+            人物姓名（可留空）
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="例如：角色名"
+              placeholder="例如：角色名；留空显示为未命名"
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-zinc-950 dark:text-gray-100"
             />
           </label>
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-            提示词
+            出自
+            <select
+              value={sourceId}
+              onChange={(e) => setSourceId(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-zinc-950 dark:text-gray-100"
+            >
+              <option value={UNCATEGORIZED_SOURCE_ID}>未归类</option>
+              {sourceOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+            带服装提示词
             <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={5}
-              placeholder="用于生成或识别的提示词…"
+              value={promptClothed}
+              onChange={(e) => setPromptClothed(e.target.value)}
+              rows={4}
+              placeholder="含服装、配饰等描述的提示词…"
+              className="mt-1 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm dark:border-gray-600 dark:bg-zinc-950 dark:text-gray-100"
+            />
+          </label>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+            不带服装提示词
+            <textarea
+              value={promptUnclothed}
+              onChange={(e) => setPromptUnclothed(e.target.value)}
+              rows={4}
+              placeholder="不含服装描述的人物本体提示词…"
               className="mt-1 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-sm dark:border-gray-600 dark:bg-zinc-950 dark:text-gray-100"
             />
           </label>
@@ -297,6 +380,14 @@ export function CharacterEditorModal({ open, entry, onClose, onSaved }: Props) {
           </div>
         </div>
       </div>
+
+      {lightboxOpen && previewSrc ? (
+        <ExportPreviewLightbox
+          url={previewSrc}
+          ariaLabel={`放大：${name.trim() || entry?.name || "人物图片"}`}
+          onClose={() => setLightboxOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

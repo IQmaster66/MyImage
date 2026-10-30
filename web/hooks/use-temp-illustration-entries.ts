@@ -1,10 +1,10 @@
 "use client";
 
 import {
-  getAllTempIllustrations,
+  fetchTempIllustrations,
   subscribeTempIllustrationChanged,
-  type TempIllustrationEntry,
-} from "@/lib/temp-illustration-db";
+} from "@/lib/temp-illustration-api";
+import type { TempIllustrationEntry } from "@/lib/temp-illustration-types";
 import { useCallback, useEffect, useState } from "react";
 
 export function useTempIllustrationEntries() {
@@ -13,14 +13,9 @@ export function useTempIllustrationEntries() {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (typeof indexedDB === "undefined") {
-      setItems([]);
-      setReady(true);
-      return;
-    }
     try {
       setError(null);
-      const all = await getAllTempIllustrations();
+      const all = await fetchTempIllustrations();
       setItems(all);
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");

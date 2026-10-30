@@ -4,6 +4,13 @@ import { colorAdjustToCssFilter, type ColorAdjust } from "@/lib/image-toolbox";
 import type { CSSProperties, MouseEvent, RefObject } from "react";
 import { useRef } from "react";
 
+export type FolderBrowsePreviewChrome = {
+  caption: string;
+  canNavigate: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+};
+
 export type ImageToolboxPreviewAsideProps = {
   previewUrl: string;
   onPickFile: (file: File | undefined) => void;
@@ -22,6 +29,8 @@ export type ImageToolboxPreviewAsideProps = {
   onOpenExportLightbox: () => void;
   compareEnabled: boolean;
   rawOriginalUrl: string | null;
+  /** 文件夹浏览模式：导航放在图片下方，不遮挡画面 */
+  folderBrowse?: FolderBrowsePreviewChrome | null;
 };
 
 export function ImageToolboxPreviewAside({
@@ -41,8 +50,10 @@ export function ImageToolboxPreviewAside({
   onOpenExportLightbox,
   compareEnabled,
   rawOriginalUrl,
+  folderBrowse = null,
 }: ImageToolboxPreviewAsideProps) {
   const replaceInputRef = useRef<HTMLInputElement>(null);
+  const folderMode = Boolean(folderBrowse);
 
   return (
     <aside className="flex min-h-0 min-w-0 flex-col gap-3 self-start overflow-y-auto rounded-xl border border-emerald-200/80 bg-white p-3 shadow-sm dark:border-emerald-900/40 dark:bg-zinc-900 lg:sticky lg:top-14 lg:max-h-[calc(100dvh-5.5rem)]">
@@ -63,13 +74,13 @@ export function ImageToolboxPreviewAside({
             <img
               ref={imgRef}
               src={previewUrl}
-              alt="编辑预览"
+              alt={folderMode ? "文件夹浏览预览" : "编辑预览"}
               onLoad={measureImg}
               style={{ filter: colorAdjustToCssFilter(colorAdjust) }}
               className="pointer-events-none mx-auto block max-h-[min(58dvh,720px)] max-w-full select-none object-contain"
               draggable={false}
             />
-            {!cropEnabled ? (
+            {!cropEnabled && !folderMode ? (
               <button
                 type="button"
                 aria-label="点击更换图片"
@@ -106,11 +117,42 @@ export function ImageToolboxPreviewAside({
             ) : null}
           </div>
         </div>
-        <p className="mt-2 text-center text-[11px] text-gray-500 dark:text-gray-400">
-          {cropEnabled
-            ? "绿框四边/四角附近（约 10px）：拉伸或收缩；框内中部：平移选区；框外：新建选区。整图选区时靠边/角可缩边，中部仍为拉框。右侧调参后下方「导出效果」会同步。右上角可更换图片。"
-            : "点击上方预览区域可重新选择图片；开启右侧「裁剪」后在此框选"}
-        </p>
+        {folderBrowse ? (
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              aria-label="上一张"
+              title="上一张（←）"
+              disabled={!folderBrowse.canNavigate}
+              onClick={folderBrowse.onPrev}
+              className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-800 dark:text-gray-100 dark:hover:bg-zinc-700"
+            >
+              上一张
+            </button>
+            <p
+              className="min-w-0 flex-1 truncate text-center text-[11px] text-gray-500 dark:text-gray-400"
+              title={folderBrowse.caption}
+            >
+              {folderBrowse.caption}
+            </p>
+            <button
+              type="button"
+              aria-label="下一张"
+              title="下一张（→）"
+              disabled={!folderBrowse.canNavigate}
+              onClick={folderBrowse.onNext}
+              className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-800 dark:text-gray-100 dark:hover:bg-zinc-700"
+            >
+              下一张
+            </button>
+          </div>
+        ) : (
+          <p className="mt-2 text-center text-[11px] text-gray-500 dark:text-gray-400">
+            {cropEnabled
+              ? "绿框四边/四角附近（约 10px）：拉伸或收缩；框内中部：平移选区；框外：新建选区。整图选区时靠边/角可缩边，中部仍为拉框。右侧调参后下方「导出效果」会同步。右上角可更换图片。"
+              : "点击上方预览区域可重新选择图片；开启右侧「裁剪」后在此框选"}
+          </p>
+        )}
       </div>
 
       <div className="shrink-0 space-y-2 border-t border-gray-200 pt-3 dark:border-gray-700">
